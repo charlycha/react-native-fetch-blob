@@ -540,76 +540,81 @@ NSMutableDictionary *fileStreams = nil;
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject
 {
-    BOOL isDir = NO;
-    BOOL exists = NO;
-    exists = [[NSFileManager defaultManager] fileExistsAtPath:path isDirectory: &isDir];
-
-    if (isDir) {
-        return reject(@"EISDIR", [NSString stringWithFormat:@"Expecting a file but '%@' is a directory", path], nil);
-    }
-    if (!exists) {
-        return reject(@"ENOENT", [NSString stringWithFormat:@"No such file '%@'", path], nil);
-    }
-
-    NSError *error = nil;
-
-    NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:&error];
-
-    if (error) {
-        reject(@"EUNKNOWN", [error description], nil);
-        return;
-    }
-
-    if ([attributes objectForKey:NSFileType] == NSFileTypeDirectory) {
-        reject(@"EISDIR", [NSString stringWithFormat:@"Expecting a file but '%@' is a directory", path], nil);
-        return;
-    }
-
-    NSData *content = [[NSFileManager defaultManager] contentsAtPath:path];
-
     NSArray *keys = [NSArray arrayWithObjects:@"md5", @"sha1", @"sha224", @"sha256", @"sha384", @"sha512", nil];
-
+    
     NSArray *digestLengths = [NSArray arrayWithObjects:
-        @CC_MD5_DIGEST_LENGTH,
-        @CC_SHA1_DIGEST_LENGTH,
-        @CC_SHA224_DIGEST_LENGTH,
-        @CC_SHA256_DIGEST_LENGTH,
-        @CC_SHA384_DIGEST_LENGTH,
-        @CC_SHA512_DIGEST_LENGTH,
-        nil];
-
+                              @CC_MD5_DIGEST_LENGTH,
+                              @CC_SHA1_DIGEST_LENGTH,
+                              @CC_SHA224_DIGEST_LENGTH,
+                              @CC_SHA256_DIGEST_LENGTH,
+                              @CC_SHA384_DIGEST_LENGTH,
+                              @CC_SHA512_DIGEST_LENGTH,
+                              nil];
+    
     NSDictionary *keysToDigestLengths = [NSDictionary dictionaryWithObjects:digestLengths forKeys:keys];
-
+    
     int digestLength = [[keysToDigestLengths objectForKey:algorithm] intValue];
-
+    
     if (!digestLength) {
-      return reject(@"EINVAL", [NSString stringWithFormat:@"Invalid algorithm '%@', must be one of md5, sha1, sha224, sha256, sha384, sha512", algorithm], nil);
+        return reject(@"EINVAL", [NSString stringWithFormat:@"Invalid algorithm '%@', must be one of md5, sha1, sha224, sha256, sha384, sha512", algorithm], nil);
     }
-
-    unsigned char buffer[digestLength];
-
-    if ([algorithm isEqualToString:@"md5"]) {
-        CC_MD5(content.bytes, (CC_LONG)content.length, buffer);
-    } else if ([algorithm isEqualToString:@"sha1"]) {
-        CC_SHA1(content.bytes, (CC_LONG)content.length, buffer);
-    } else if ([algorithm isEqualToString:@"sha224"]) {
-        CC_SHA224(content.bytes, (CC_LONG)content.length, buffer);
-    } else if ([algorithm isEqualToString:@"sha256"]) {
-        CC_SHA256(content.bytes, (CC_LONG)content.length, buffer);
-    } else if ([algorithm isEqualToString:@"sha384"]) {
-        CC_SHA384(content.bytes, (CC_LONG)content.length, buffer);
-    } else if ([algorithm isEqualToString:@"sha512"]) {
-        CC_SHA512(content.bytes, (CC_LONG)content.length, buffer);
-    } else {
-        reject(@"EINVAL", [NSString stringWithFormat:@"Invalid algorithm '%@', must be one of md5, sha1, sha224, sha256, sha384, sha512", algorithm], nil);
-        return;
-    }
-
-    NSMutableString *output = [NSMutableString stringWithCapacity:digestLength * 2];
-    for(int i = 0; i < digestLength; i++)
-        [output appendFormat:@"%02x",buffer[i]];
-
-    resolve(output);
+    
+    [[self class] getPathFromUri:path completionHandler:^(NSString *path, ALAssetRepresentation *asset) {
+        __block NSData * content;
+        NSError * err;
+        __block Byte * fileBuffer;
+        if(asset != nil)
+        {
+            fileBuffer = malloc(asset.size);
+            [asset getBytes:fileBuffer fromOffset:0 length:asset.size error:&err];
+            if(err != nil)
+            {
+                free(fileBuffer);
+                return reject(@"EUNSPECIFIED", [err description], err);
+            }
+            content = [NSData dataWithBytes:fileBuffer length:asset.size];
+            free(fileBuffer);
+        }
+        else
+        {
+            BOOL isDir = NO;
+            if(![[NSFileManager defaultManager] fileExistsAtPath:path isDirectory: &isDir]) {
+                if (isDir) {
+                    return reject(@"EISDIR", [NSString stringWithFormat:@"Expecting a file but '%@' is a directory", path], nil);
+                } else {
+                    return reject(@"ENOENT", [NSString stringWithFormat:@"No such file '%@'", path], nil);
+                }
+                return;
+            }
+            content = [NSData dataWithContentsOfFile:path];
+        }
+        
+        unsigned char buffer[digestLength];
+        
+        if ([algorithm isEqualToString:@"md5"]) {
+            CC_MD5(content.bytes, (CC_LONG)content.length, buffer);
+        } else if ([algorithm isEqualToString:@"sha1"]) {
+            CC_SHA1(content.bytes, (CC_LONG)content.length, buffer);
+        } else if ([algorithm isEqualToString:@"sha224"]) {
+            CC_SHA224(content.bytes, (CC_LONG)content.length, buffer);
+        } else if ([algorithm isEqualToString:@"sha256"]) {
+            CC_SHA256(content.bytes, (CC_LONG)content.length, buffer);
+        } else if ([algorithm isEqualToString:@"sha384"]) {
+            CC_SHA384(content.bytes, (CC_LONG)content.length, buffer);
+        } else if ([algorithm isEqualToString:@"sha512"]) {
+            CC_SHA512(content.bytes, (CC_LONG)content.length, buffer);
+        } else {
+            reject(@"EINVAL", [NSString stringWithFormat:@"Invalid algorithm '%@', must be one of md5, sha1, sha224, sha256, sha384, sha512", algorithm], nil);
+            return;
+        }
+        
+        NSMutableString *output = [NSMutableString stringWithCapacity:digestLength * 2];
+        for(int i = 0; i < digestLength; i++)
+            [output appendFormat:@"%02x",buffer[i]];
+        
+        resolve(output);
+        
+    }];
 }
 
 # pragma mark - mkdir
